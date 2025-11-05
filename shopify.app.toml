@@ -1,0 +1,33 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "c3b2d8a3d198bdc8ec088cc1b04ab200"
+name = "transform"
+type = "private"
+application_url = "https://example.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2026-01"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "customer_read_customers,customer_read_orders,customer_write_customers,customer_write_orders,read_customers,read_orders,write_app_proxy,write_cart_transforms,write_content,write_online_store_pages,write_orders,write_products,read_all_orders"
+
+[auth]
+redirect_urls = [ "https://example.com/api/auth" ,"https://admin.shopify.com/store/himanshu-self","https://himanshu-self.myshopify.com/"]
+
+[app_proxy]
+url = "https://example.com/my-app-proxy"
+subpath = "my-custom-path"
+prefix = "apps"

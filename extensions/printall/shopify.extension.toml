@@ -1,0 +1,24 @@
+
+api_version = "2025-04"
+[[extensions]]
+name = "printall"
+handle = "printall"
+type = "ui_extension"
+uid = "9d94259c-edae-cfa7-1b53-93e1b5878964da90260a"
+
+# Only 1 target can be specified for each admin print action extension
+[[extensions.targeting]]
+module = "./src/PrintActionExtension.jsx"
+target = "admin.order-index.selection-print-action.render"
+
+[access_scopes]
+scopes = "read_all_orders,write_cart_transforms,write_products,write_content,write_online_store_pages,write_app_proxy,customer_read_customers,customer_write_customers,customer_read_orders,read_customers,read_orders,write_orders,customer_write_orders"
+
+network_access = true
+
+# Valid extension targets:
+
+# - admin.order-details.print-action.render
+# - admin.order-index.selection-print-action.render
+# - admin.product-details.print-action.render
+# - admin.product-index.selection-print-action.render
