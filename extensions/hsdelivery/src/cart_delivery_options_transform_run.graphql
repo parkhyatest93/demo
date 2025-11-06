@@ -1,15 +1,36 @@
-query Input {
+query RunInput {
+  deliveryCustomization {
+    metafield(
+      namespace: "$app:delivery-customization"
+      key: "function-configuration"
+    ) {
+      value
+    }
+  }
   cart {
+    lines {
+      merchandise {
+        ... on ProductVariant {
+          product {
+            hasTags(tags: ["perishable"]) {
+              hasTag
+              tag
+            }
+          }
+        }
+      }
+    }
     deliveryGroups {
       deliveryAddress {
-        provinceCode
+        countryCode
       }
       deliveryOptions {
+        title # This is an OPTIONAL field in the input data. It doesn't have a ! at the end in the graphql schema
+        cost {
+          amount # This is a decimal field in the input data
+        }
         handle
-        title
       }
     }
   }
 }
-
- 
