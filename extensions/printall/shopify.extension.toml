@@ -12,7 +12,7 @@ module = "./src/PrintActionExtension.jsx"
 target = "admin.order-index.selection-print-action.render"
 
 [access_scopes]
-scopes = "read_all_orders,write_cart_transforms,write_products,write_content,write_online_store_pages,write_app_proxy,customer_read_customers,customer_write_customers,customer_read_orders,read_customers,read_orders,write_orders,customer_write_orders"
+scopes = "read_all_orders,write_cart_transforms,write_products,write_content,write_online_store_pages,write_app_proxy,customer_read_customers,customer_write_customers,customer_read_orders,read_customers,read_orders,read_products,write_orders,customer_write_orders"
 
 network_access = true
 

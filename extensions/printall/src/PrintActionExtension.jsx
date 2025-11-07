@@ -7,21 +7,38 @@ import {
   Text,
   Button,
 } from "@shopify/ui-extensions-react/admin";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const TARGET = "admin.order-index.selection-print-action.render";
 
 export default reactExtension(TARGET, () => <App />);
 
 function App() {
-  const { data, navigate } = useApi(TARGET); // navigate is from Shopify, not Remix
+  const { data, navigate } = useApi(TARGET);
   const [src, setSrc] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
   const [tagsAdded, setTagsAdded] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [downloadUrl, setDownloadUrl] = useState(null);
+  const blobUrlRef = useRef(null);
 
-  // Add Himanshu Tag to selected orders
+  // Cleanup blob URL on unmount
+  useEffect(() => {
+    return () => {
+      try {
+        if (blobUrlRef.current) {
+          URL.revokeObjectURL(blobUrlRef.current);
+          blobUrlRef.current = null;
+        }
+      } catch (err) {
+        console.warn("Error cleaning blob URL:", err);
+      }
+    };
+  }, []);
+
+  // --- Step 1: Add tag to orders ---
   const addHimanshuTags = async () => {
     setLoading(true);
     setError(null);
@@ -63,12 +80,13 @@ function App() {
 
           const result = await res.json();
           if (result?.data?.orderUpdate?.userErrors?.length > 0) {
+            console.error("Tag update error:", result.data.orderUpdate.userErrors);
             errorCount++;
           } else {
             successCount++;
           }
         } catch (err) {
-          console.error("Tag error for order:", order.name, err);
+          console.error("Tag error for order:", order?.name, err);
           errorCount++;
         }
       }
@@ -83,49 +101,99 @@ function App() {
     }
   };
 
-  // Generate PDF URLs for selected orders (for bulk print)
-  const generatePdfUrls = async (orders) => {
-    const urls = [];
-    for (const order of orders) {
-      const orderId = order.id.split("/").pop();
-      const pdfUrl = `/packing-slip/${orderId}`; // Relative URL
-      urls.push(pdfUrl);
+  // --- Step 2: Generate ZIP of packing slips ---
+const generateBulkPackingSlips = async (orderIds) => {
+  try {
+    console.log("Sending order IDs to backend:", orderIds);
+
+    const res = await fetch(
+      "https://championships-metric-wrapped-voting.trycloudflare.com/bulk-packing-slips",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orders: orderIds }),
+      }
+    );
+
+    if (!res.ok) {
+      throw new Error(`Backend error: ${res.statusText}`);
     }
-    return urls;
+
+    // ✅ Expecting backend to respond with: { downloadUrl: "https://..." }
+    const { downloadUrl } = await res.json();
+    if (!downloadUrl) throw new Error("Backend did not return a download URL");
+
+    console.log("✅ Got ZIP download URL:", downloadUrl);
+    setDownloadUrl(downloadUrl);
+
+    return downloadUrl;
+  } catch (err) {
+    console.error("ZIP generation failed:", err);
+    throw new Error("Failed to generate ZIP: " + err.message);
+  }
+};
+
+  // --- Step 3: Trigger browser download safely ---
+  const startDownloadFromBlobUrl = (blobUrl) => {
+    try {
+      if (!blobUrl || blobUrl.startsWith("blob:null")) {
+        console.error("Invalid blob URL:", blobUrl);
+        alert("Download not available. Please regenerate the ZIP.");
+        return;
+      }
+
+      // hidden iframe triggers download without <a>
+      const iframe = document.createElement("iframe");
+      iframe.style.display = "none";
+      iframe.src = blobUrl;
+      document.body.appendChild(iframe);
+
+      // cleanup iframe
+      setTimeout(() => {
+        try {
+          document.body.removeChild(iframe);
+        } catch {}
+      }, 5000);
+    } catch (err) {
+      console.error("Failed to start download:", err);
+      alert("Download failed to start.");
+    }
   };
 
-  // Main: Add Tag + Show PDF in Print Modal
+  // --- Step 4: Combine everything ---
   const processBulkOrders = async () => {
     setLoading(true);
     setError(null);
     setSuccess(false);
     setSrc(null);
+    setProgress(0);
 
     try {
       const selectedOrders = data?.selected || data?.selection || [];
-      if (selectedOrders.length === 0) {
+      if (!selectedOrders || selectedOrders.length === 0) {
         setError("No orders selected");
         return;
       }
 
-      // Step 1: Add tag
+      const orderIds = selectedOrders.map((o) => o.id);
+      console.log("Selected order IDs:", orderIds);
+
+      // Add tag first
       await addHimanshuTags();
 
-      // Step 2: Generate PDF URLs
-      const pdfUrls = await generatePdfUrls(selectedOrders);
+      // Generate ZIP file
+      setProgress(20);
+      const blobUrl = await generateBulkPackingSlips(orderIds);
+      setProgress(100);
 
-      if (pdfUrls.length === 1) {
-        // Single order → show in modal
-        setSrc(pdfUrls[0]);
-      } else {
-        // Multiple → navigate to first, or show list
-        setSrc(pdfUrls[0]); // Show first PDF
-        // Optionally: navigate to a bulk print page
-      }
+      // Auto-download
+      startDownloadFromBlobUrl(blobUrl);
 
       setSuccess(true);
     } catch (err) {
-      setError("PDF error: " + err.message);
+      console.error("Process error:", err);
+      setError("Process error: " + err.message);
+      setProgress(0);
     } finally {
       setLoading(false);
     }
@@ -134,23 +202,29 @@ function App() {
   const count = data?.selected?.length || data?.selection?.length || 0;
 
   return (
-    <AdminPrintAction src={src}>
+    <AdminPrintAction src={src || undefined}>
       <BlockStack gap="base">
         {loading && (
           <Banner tone="info">
-            <Text>Processing {count} orders...</Text>
+            <BlockStack gap="tight">
+              <Text>Processing {count} orders...</Text>
+              <Text>Progress: {Math.round(progress)}%</Text>
+            </BlockStack>
           </Banner>
         )}
+
         {error && (
           <Banner tone="critical">
             <Text>{error}</Text>
           </Banner>
         )}
+
         {success && (
           <Banner tone="success">
             <Text>Done! {count} orders processed.</Text>
           </Banner>
         )}
+
         {tagsAdded && (
           <Banner tone="success">
             <Text>himanshu-tag added!</Text>
@@ -164,7 +238,7 @@ function App() {
           onPress={processBulkOrders}
           disabled={loading || count === 0}
         >
-          {loading ? "Working..." : `Add Tag & Print (${count})`}
+          {loading ? "Working..." : `Add Tag & Print Bulk (${count})`}
         </Button>
 
         <Button
@@ -175,14 +249,26 @@ function App() {
           Add Tag Only
         </Button>
 
-        {/* Optional: Open first PDF in new tab (allowed) */}
-        {src && count === 1 && (
-          <Button
-            kind="plain"
-            onPress={() => navigate(src, { target: "new" })}
-          >
-            Open in New Tab
-          </Button>
+        {/* Download button when ZIP ready */}
+        {downloadUrl && (
+            <Button
+              kind="plain"
+              onPress={() => {
+                // open direct HTTPS file in new tab
+                window.open(downloadUrl, "_blank");
+              }}
+            >
+              Download ZIP ({count} Slips)
+            </Button>
+          )}
+
+
+        {/* Debug info (optional) */}
+        {downloadUrl && (
+          <Text>
+            Debug blob URL: <br />
+            {downloadUrl}
+          </Text>
         )}
       </BlockStack>
     </AdminPrintAction>
