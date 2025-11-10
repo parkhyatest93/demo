@@ -34,7 +34,7 @@ subpath = "my-custom-path"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_assigned_fulfillment_orders,write_assigned_fulfillment_orders,read_third_party_fulfillment_orders,read_merchant_managed_fulfillment_orders,read_products,write_cart_transforms,write_products,write_content,write_online_store_pages,write_app_proxy,customer_read_customers,customer_write_customers,customer_read_orders,read_customers,read_orders,write_orders,customer_write_orders,read_all_orders"
+scopes = "write_themes,write_images,read_assigned_fulfillment_orders,write_assigned_fulfillment_orders,read_third_party_fulfillment_orders,read_merchant_managed_fulfillment_orders,read_products,write_cart_transforms,write_products,write_content,write_online_store_pages,write_app_proxy,customer_read_customers,customer_write_customers,customer_read_orders,read_customers,read_orders,write_orders,customer_write_orders,read_all_orders"
 
 [auth]
 redirect_urls = [ "https://example.com/api/auth" ,"https://admin.shopify.com/store/himanshu-self","https://himanshu-self.myshopify.com/"]

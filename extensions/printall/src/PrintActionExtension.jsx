@@ -5,7 +5,7 @@ import {
   Banner,
   BlockStack,
   Text,
-  Button, 
+  Button,
 } from "@shopify/ui-extensions-react/admin";
 import { useEffect, useState } from "react";
 
@@ -31,7 +31,7 @@ function App() {
 
     try {
       const selectedOrders = data?.selected || data?.selection || [];
-      console.log("selectedOrders",selectedOrders);
+      console.log("selectedOrders", selectedOrders);
       if (selectedOrders.length === 0) {
         setError("No orders selected");
         return;
@@ -89,7 +89,7 @@ function App() {
   // Generate bulk packing slips via backend (POST to /api/bulk-packing-slips)
   const generateBulkPackingSlips = async (orderIds) => {
     try {
-      const res = await fetch("https://stress-represented-combination-stolen.trycloudflare.com/bulk-packing-slips", {
+      const res = await fetch("/bulk-packing-slips", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orders: orderIds }),
@@ -106,8 +106,11 @@ function App() {
       }
 
       // For success, it's binary ZIP or PDF
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const data = await res.json();
+
+      // const blob = await res.blob();
+      console.log("resssss", data);
+      const url = data.shopifyUrl;
 
       setProgress(100);
       return url;
@@ -134,7 +137,7 @@ function App() {
       }
 
       const orderIds = selectedOrders.map(order => order.id);
-   
+
       // Step 1: Add tag (async, but wait for it)
       await addHimanshuTags();
 
@@ -168,7 +171,7 @@ function App() {
           <Banner tone="info">
             <BlockStack gap="tight">
               <Text>Processing {count} orders...</Text>
-               
+
             </BlockStack>
           </Banner>
         )}
@@ -205,32 +208,11 @@ function App() {
         >
           Add Tag Only
         </Button>
-
-        {/* Bulk Download Button */}
         {downloadUrl && (
-          <Button
-            kind="plain"
-            onPress={() => {
-              if (typeof window === 'undefined') {
-                console.error('Download not available in this environment');
-                return;
-              }
-              const a = document.createElement("a");
-              a.href = downloadUrl;
-              a.download = `packing-slips-${new Date().toISOString().split('T')[0]}.zip`;
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-              // Revoke after a delay to allow download to start
-              setTimeout(() => {
-                URL.revokeObjectURL(downloadUrl);
-                setDownloadUrl(null);
-              }, 1000);
-            }}
-          >
-            Download ZIP ({count} Slips)
-          </Button>
+          <><s-text> {count} Slips Generate Download Link: </s-text><s-link href={downloadUrl}> {downloadUrl}</s-link></>
+
         )}
+
 
         {/* Single: Open in New Tab */}
         {src && count === 1 && (
