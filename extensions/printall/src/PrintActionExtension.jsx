@@ -5,9 +5,9 @@ import {
   Banner,
   BlockStack,
   Text,
-  Button,
+  Button, 
 } from "@shopify/ui-extensions-react/admin";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 const TARGET = "admin.order-index.selection-print-action.render";
 
@@ -15,30 +15,15 @@ export default reactExtension(TARGET, () => <App />);
 
 function App() {
   const { data, navigate } = useApi(TARGET);
-  const [src, setSrc] = useState(null);
+  const [src, setSrc] = useState(null); // Re-added for single PDF modal
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
   const [tagsAdded, setTagsAdded] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [downloadUrl, setDownloadUrl] = useState(null);
-  const blobUrlRef = useRef(null);
+  const [progress, setProgress] = useState(0); // For bulk progress
+  const [downloadUrl, setDownloadUrl] = useState(null); // For ZIP download
 
-  // Cleanup blob URL on unmount
-  useEffect(() => {
-    return () => {
-      try {
-        if (blobUrlRef.current) {
-          URL.revokeObjectURL(blobUrlRef.current);
-          blobUrlRef.current = null;
-        }
-      } catch (err) {
-        console.warn("Error cleaning blob URL:", err);
-      }
-    };
-  }, []);
-
-  // --- Step 1: Add tag to orders ---
+  // Add Himanshu Tag to selected orders
   const addHimanshuTags = async () => {
     setLoading(true);
     setError(null);
@@ -46,6 +31,7 @@ function App() {
 
     try {
       const selectedOrders = data?.selected || data?.selection || [];
+      console.log("selectedOrders",selectedOrders);
       if (selectedOrders.length === 0) {
         setError("No orders selected");
         return;
@@ -80,13 +66,12 @@ function App() {
 
           const result = await res.json();
           if (result?.data?.orderUpdate?.userErrors?.length > 0) {
-            console.error("Tag update error:", result.data.orderUpdate.userErrors);
             errorCount++;
           } else {
             successCount++;
           }
         } catch (err) {
-          console.error("Tag error for order:", order?.name, err);
+          console.error("Tag error for order:", order.name, err);
           errorCount++;
         }
       }
@@ -101,97 +86,72 @@ function App() {
     }
   };
 
-  // --- Step 2: Generate ZIP of packing slips ---
-const generateBulkPackingSlips = async (orderIds) => {
-  try {
-    console.log("Sending order IDs to backend:", orderIds);
-
-    const res = await fetch(
-      "https://championships-metric-wrapped-voting.trycloudflare.com/bulk-packing-slips",
-      {
+  // Generate bulk packing slips via backend (POST to /api/bulk-packing-slips)
+  const generateBulkPackingSlips = async (orderIds) => {
+    try {
+      const res = await fetch("https://stress-represented-combination-stolen.trycloudflare.com/bulk-packing-slips", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orders: orderIds }),
-      }
-    );
+      });
 
-    if (!res.ok) {
-      throw new Error(`Backend error: ${res.statusText}`);
-    }
+      console.log("Response status:", res.status, res.statusText);
+      console.log("Response headers:", Object.fromEntries(res.headers.entries()));
+      console.log("Response ok:", res.ok);
 
-    // ✅ Expecting backend to respond with: { downloadUrl: "https://..." }
-    const { downloadUrl } = await res.json();
-    if (!downloadUrl) throw new Error("Backend did not return a download URL");
-
-    console.log("✅ Got ZIP download URL:", downloadUrl);
-    setDownloadUrl(downloadUrl);
-
-    return downloadUrl;
-  } catch (err) {
-    console.error("ZIP generation failed:", err);
-    throw new Error("Failed to generate ZIP: " + err.message);
-  }
-};
-
-  // --- Step 3: Trigger browser download safely ---
-  const startDownloadFromBlobUrl = (blobUrl) => {
-    try {
-      if (!blobUrl || blobUrl.startsWith("blob:null")) {
-        console.error("Invalid blob URL:", blobUrl);
-        alert("Download not available. Please regenerate the ZIP.");
-        return;
+      if (!res.ok) {
+        // For errors, read as text to avoid json parse error on binary
+        const errorText = await res.text();
+        throw new Error(`Backend error ${res.status}: ${res.statusText} - ${errorText.substring(0, 500)}`);
       }
 
-      // hidden iframe triggers download without <a>
-      const iframe = document.createElement("iframe");
-      iframe.style.display = "none";
-      iframe.src = blobUrl;
-      document.body.appendChild(iframe);
+      // For success, it's binary ZIP or PDF
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
 
-      // cleanup iframe
-      setTimeout(() => {
-        try {
-          document.body.removeChild(iframe);
-        } catch {}
-      }, 5000);
+      setProgress(100);
+      return url;
     } catch (err) {
-      console.error("Failed to start download:", err);
-      alert("Download failed to start.");
+      console.error("Fetch error details:", err);
+      throw new Error(`PDF generation failed: ${err.message}`);
     }
   };
 
-  // --- Step 4: Combine everything ---
+  // Main: Add Tag + Bulk PDF Generation
   const processBulkOrders = async () => {
     setLoading(true);
     setError(null);
     setSuccess(false);
     setSrc(null);
     setProgress(0);
+    setDownloadUrl(null);
 
     try {
       const selectedOrders = data?.selected || data?.selection || [];
-      if (!selectedOrders || selectedOrders.length === 0) {
+      if (selectedOrders.length === 0) {
         setError("No orders selected");
         return;
       }
 
-      const orderIds = selectedOrders.map((o) => o.id);
-      console.log("Selected order IDs:", orderIds);
-
-      // Add tag first
+      const orderIds = selectedOrders.map(order => order.id);
+   
+      // Step 1: Add tag (async, but wait for it)
       await addHimanshuTags();
 
-      // Generate ZIP file
-      setProgress(20);
-      const blobUrl = await generateBulkPackingSlips(orderIds);
-      setProgress(100);
+      // Step 3: Generate bulk PDFs (server-side for 50+)
+      setProgress(60);
+      const url = await generateBulkPackingSlips(orderIds);
 
-      // Auto-download
-      startDownloadFromBlobUrl(blobUrl);
+      // For single order, use AdminPrintAction; for bulk, provide download
+      if (orderIds.length === 1) {
+        setSrc(url);
+      } else {
+        // Bulk: Set download URL for ZIP
+        setDownloadUrl(url);
+      }
 
       setSuccess(true);
     } catch (err) {
-      console.error("Process error:", err);
       setError("Process error: " + err.message);
       setProgress(0);
     } finally {
@@ -202,29 +162,26 @@ const generateBulkPackingSlips = async (orderIds) => {
   const count = data?.selected?.length || data?.selection?.length || 0;
 
   return (
-    <AdminPrintAction src={src || undefined}>
+    <AdminPrintAction src={src || undefined}> {/* Only use src for single PDF, not ZIP */}
       <BlockStack gap="base">
         {loading && (
           <Banner tone="info">
             <BlockStack gap="tight">
               <Text>Processing {count} orders...</Text>
-              <Text>Progress: {Math.round(progress)}%</Text>
+               
             </BlockStack>
           </Banner>
         )}
-
         {error && (
           <Banner tone="critical">
             <Text>{error}</Text>
           </Banner>
         )}
-
         {success && (
           <Banner tone="success">
             <Text>Done! {count} orders processed.</Text>
           </Banner>
         )}
-
         {tagsAdded && (
           <Banner tone="success">
             <Text>himanshu-tag added!</Text>
@@ -249,26 +206,40 @@ const generateBulkPackingSlips = async (orderIds) => {
           Add Tag Only
         </Button>
 
-        {/* Download button when ZIP ready */}
+        {/* Bulk Download Button */}
         {downloadUrl && (
-            <Button
-              kind="plain"
-              onPress={() => {
-                // open direct HTTPS file in new tab
-                window.open(downloadUrl, "_blank");
-              }}
-            >
-              Download ZIP ({count} Slips)
-            </Button>
-          )}
+          <Button
+            kind="plain"
+            onPress={() => {
+              if (typeof window === 'undefined') {
+                console.error('Download not available in this environment');
+                return;
+              }
+              const a = document.createElement("a");
+              a.href = downloadUrl;
+              a.download = `packing-slips-${new Date().toISOString().split('T')[0]}.zip`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              // Revoke after a delay to allow download to start
+              setTimeout(() => {
+                URL.revokeObjectURL(downloadUrl);
+                setDownloadUrl(null);
+              }, 1000);
+            }}
+          >
+            Download ZIP ({count} Slips)
+          </Button>
+        )}
 
-
-        {/* Debug info (optional) */}
-        {downloadUrl && (
-          <Text>
-            Debug blob URL: <br />
-            {downloadUrl}
-          </Text>
+        {/* Single: Open in New Tab */}
+        {src && count === 1 && (
+          <Button
+            kind="plain"
+            onPress={() => navigate(src, { target: "new" })}
+          >
+            Open in New Tab
+          </Button>
         )}
       </BlockStack>
     </AdminPrintAction>

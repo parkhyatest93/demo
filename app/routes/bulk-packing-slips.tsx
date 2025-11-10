@@ -2,8 +2,9 @@ import { json } from "@remix-run/node";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { Liquid } from "liquidjs";
 import puppeteer from "puppeteer";
-import JSZip from "jszip";
 import { authenticate } from "../shopify.server";
+import { writeFile, mkdir } from 'fs/promises';
+import path from 'path';
 
 // ✅ Global CORS headers
 const CORS_HEADERS = {
@@ -113,6 +114,7 @@ const PACKING_SLIP_TEMPLATE = `
     th, td { border: 1px solid #000; padding: 8px; text-align: left; }
     th { background-color: #f0f0f0; }
     .image { width: 50px; height: auto; }
+    .page-break { page-break-after: always; }
   </style>
 </head>
 <body>
@@ -159,6 +161,7 @@ const PACKING_SLIP_TEMPLATE = `
   </table>
 
   <p style="text-align: center; margin-top: 40px;">Thank you for your order!</p>
+  <div class="page-break"></div>
 </body>
 </html>
 ` as const;
@@ -264,8 +267,8 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     );
 
-    const data: GraphQLResponse = await response.json(); 
-    console.log(JSON.stringify(data, null, 2))
+    const data: GraphQLResponse = await response.json();
+    console.log("GraphQL response:", data);
 
     if (data.errors || !data.data) {
       throw new Error("Failed to fetch orders: " + JSON.stringify(data.errors || "Unknown error"));
@@ -293,69 +296,46 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     console.log("Puppeteer browser launched successfully");
 
-    if (orders.length === 1) {
-      // Single order: Return PDF directly
-      const order = orders[0];
-      console.log("Processing single order:", order.name);
+    // Generate combined HTML for all orders
+    let combinedHtml = '';
+    for (const order of orders) {
+      console.log(`Rendering HTML for order: ${order.name}`);
       const html = await engine.parseAndRender(PACKING_SLIP_TEMPLATE, { order });
-      console.log("HTML rendered for single order");
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: "networkidle0" });
-      const pdfBuffer = await page.pdf({ format: "A4" });
-      console.log("PDF generated for single order, size:", pdfBuffer.length);
-      await page.close();
-
-      const safeName = order.name.replace(/[^a-zA-Z0-9_-]/g, "_");
-
-      await browser.close();
-      console.log("Browser closed for single order");
-
-      return new Response(new Uint8Array(pdfBuffer), {
-        status: 200,
-        headers: {
-          ...CORS_HEADERS,
-          "Content-Type": "application/pdf",
-          "Content-Disposition": `inline; filename="${safeName}.pdf"`,
-        },
-      });
-    } else {
-      // Multiple orders: Generate ZIP
-      const zip = new JSZip();
-      console.log("JSZip instance created for bulk");
-
-      for (const order of orders) {
-        console.log(`Processing bulk order: ${order.name}`);
-        const html = await engine.parseAndRender(PACKING_SLIP_TEMPLATE, { order });
-        console.log(`HTML rendered for ${order.name}`);
-        const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: "networkidle0" });
-        const pdfBuffer = await page.pdf({ format: "A4" });
-        console.log(`PDF generated for ${order.name}, size: ${pdfBuffer.length}`);
-        await page.close();
-
-        const safeName = order.name.replace(/[^a-zA-Z0-9_-]/g, "_");
-        zip.file(`${safeName}.pdf`, pdfBuffer);
-        console.log(`Added ${safeName}.pdf to ZIP`);
-      }
-
-      console.log("All PDFs processed, closing browser");
-      await browser.close();
-      console.log("Browser closed for bulk");
-
-      const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
-      console.log("ZIP generated, total size:", zipBuffer.length);
-
-      const zipArray = new Uint8Array(zipBuffer);
-
-      return new Response(zipArray, {
-        status: 200,
-        headers: {
-          ...CORS_HEADERS,
-          "Content-Type": "application/zip",
-          "Content-Disposition": 'attachment; filename="packing-slips.zip"',
-        },
-      });
+      combinedHtml += html;
     }
+    console.log(`Combined HTML generated for ${orders.length} orders`);
+
+    const page = await browser.newPage();
+    await page.setContent(combinedHtml, { waitUntil: "networkidle0" });
+    const pdfBuffer = await page.pdf({ 
+      format: "A4",
+      printBackground: true 
+    });
+    console.log(`Single PDF generated for ${orders.length} orders, size: ${pdfBuffer.length}`);
+    await page.close();
+
+    console.log("Browser closed");
+
+    // Create 'pdfs' directory if it doesn't exist
+    const pdfsDir = path.join(process.cwd(), 'pdfs');
+    await mkdir(pdfsDir, { recursive: true });
+
+    // Generate timestamped filename
+    const now = new Date();
+    const timestamp = now.toISOString().replace(/[:.]/g, '-').split('Z')[0]; // e.g., 2025-11-10T11-09-00
+    const filename = `packing-slips-${timestamp}.pdf`;
+    const filePath = path.join(pdfsDir, filename);
+    await writeFile(filePath, pdfBuffer);
+    console.log(`PDF saved to file: ${filePath}`);
+
+    // Return success response with file path
+    return json({ 
+      success: true, 
+      message: `Single PDF with ${orders.length} packing slips generated and saved successfully`,
+      filePath,
+      filename
+    }, { status: 200, headers: CORS_HEADERS });
+
   } catch (error) {
     console.error("❌ Bulk packing slips error details:", error);
     return json({ error: "Failed to generate packing slips: " + (error as Error).message }, { status: 500, headers: CORS_HEADERS });
