@@ -307,9 +307,9 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const page = await browser.newPage();
     await page.setContent(combinedHtml, { waitUntil: "networkidle0" });
-    const pdfBuffer = await page.pdf({ 
+    const pdfBuffer = await page.pdf({
       format: "A4",
-      printBackground: true 
+      printBackground: true
     });
     console.log(`Single PDF generated for ${orders.length} orders, size: ${pdfBuffer.length}`);
     await page.close();
@@ -333,22 +333,20 @@ export async function action({ request }: ActionFunctionArgs) {
 
 
     // 🧱 Upload PDF to Shopify Files via staged upload process
-console.log("Uploading PDF to Shopify Files...");
+    console.log("Uploading PDF to Shopify Files...");
 
 
-// Step 1: Get staged upload URL from Shopify
-// Step 1: Get staged upload URL
-// STEP 1: Request a staged upload URL
-const endpoint = `https://${session.shop}/admin/api/2024-10/graphql.json`;
 
-const stagedRes = await fetch(endpoint, {
-  method: "POST",
-  headers: {
-    "X-Shopify-Access-Token": session.accessToken ?? "",
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    query: `
+    const endpoint = `https://${session.shop}/admin/api/2024-10/graphql.json`;
+
+    const stagedRes = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "X-Shopify-Access-Token": session.accessToken ?? "",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: `
       mutation stagedUploadsCreate($input: [StagedUploadInput!]!) {
         stagedUploadsCreate(input: $input) {
           stagedTargets {
@@ -366,55 +364,55 @@ const stagedRes = await fetch(endpoint, {
         }
       }
     `,
-    variables: {
-      input: [
-        {
-          resource: "FILE", // ✅ Use "FILE" for PDFs or documents
-          filename: filename,
-          mimeType: "application/pdf",
-          httpMethod: "POST",
+        variables: {
+          input: [
+            {
+              resource: "FILE", // ✅ Use "FILE" for PDFs or documents
+              filename: filename,
+              mimeType: "application/pdf",
+              httpMethod: "POST",
+            },
+          ],
         },
-      ],
-    },
-  }),
-});
+      }),
+    });
 
-const stagedData = await stagedRes.json();
-if (stagedData.errors || stagedData.data?.stagedUploadsCreate?.userErrors?.length > 0) {
-  throw new Error("Failed to get staged upload URL: " + JSON.stringify(stagedData));
-}
+    const stagedData = await stagedRes.json();
+    if (stagedData.errors || stagedData.data?.stagedUploadsCreate?.userErrors?.length > 0) {
+      throw new Error("Failed to get staged upload URL: " + JSON.stringify(stagedData));
+    }
 
-const stagedTarget = stagedData.data.stagedUploadsCreate.stagedTargets[0];
-const uploadUrl = stagedTarget.url;
-const resourceUrl = stagedTarget.resourceUrl;
-const params = stagedTarget.parameters;
+    const stagedTarget = stagedData.data.stagedUploadsCreate.stagedTargets[0];
+    const uploadUrl = stagedTarget.url;
+    const resourceUrl = stagedTarget.resourceUrl;
+    const params = stagedTarget.parameters;
 
 
-// Step 2: Upload file to S3
-// Upload file to the returned S3 URL
-const uploadForm = new FormData();
-params.forEach((p: any) => uploadForm.append(p.name, p.value));
-uploadForm.append("file", new Blob([Buffer.from(pdfBuffer)], { type: "application/pdf" }));
+    // Step 2: Upload file to S3
+    // Upload file to the returned S3 URL
+    const uploadForm = new FormData();
+    params.forEach((p: any) => uploadForm.append(p.name, p.value));
+    uploadForm.append("file", new Blob([Buffer.from(pdfBuffer)], { type: "application/pdf" }));
 
-const s3UploadRes = await fetch(uploadUrl, {
-  method: "POST",
-  body: uploadForm,
-});
+    const s3UploadRes = await fetch(uploadUrl, {
+      method: "POST",
+      body: uploadForm,
+    });
 
-if (!s3UploadRes.ok) {
-  throw new Error("S3 upload failed: " + s3UploadRes.statusText);
-}
+    if (!s3UploadRes.ok) {
+      throw new Error("S3 upload failed: " + s3UploadRes.statusText);
+    }
 
 
-// Finalize file creation
-const finalizeRes = await fetch(endpoint, {
-  method: "POST",
-  headers: {
-    "X-Shopify-Access-Token": session.accessToken ?? "",
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    query: `
+    // Finalize file creation
+    const finalizeRes = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "X-Shopify-Access-Token": session.accessToken ?? "",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: `
       mutation fileCreate($files: [FileCreateInput!]!) {
         fileCreate(files: $files) {
           files {
@@ -431,44 +429,44 @@ const finalizeRes = await fetch(endpoint, {
         }
       }
     `,
-    variables: {
-      files: [
-        {
-          alt: `Bulk packing slips for ${orders.length} orders`,
-          contentType: "FILE",
-          originalSource: resourceUrl, // ✅ Use the resourceUrl from staged upload
+        variables: {
+          files: [
+            {
+              alt: `Bulk packing slips for ${orders.length} orders`,
+              contentType: "FILE",
+              originalSource: resourceUrl, // ✅ Use the resourceUrl from staged upload
+            },
+          ],
         },
-      ],
-    },
-  }),
-});
+      }),
+    });
 
-const finalizeData = await finalizeRes.json();
-if (finalizeData.errors || finalizeData.data?.fileCreate?.userErrors?.length > 0) {
-  throw new Error("File creation failed: " + JSON.stringify(finalizeData));
-}
+    const finalizeData = await finalizeRes.json();
+    if (finalizeData.errors || finalizeData.data?.fileCreate?.userErrors?.length > 0) {
+      throw new Error("File creation failed: " + JSON.stringify(finalizeData));
+    }
 
-const uploadedFile = finalizeData.data.fileCreate.files[0];
-console.log("uploadedFile",uploadedFile);
- 
+    const uploadedFile = finalizeData.data.fileCreate.files[0];
+    console.log("uploadedFile", uploadedFile);
 
-let shopifyUrl = uploadedFile?.url;
-const fileId = uploadedFile?.id;
 
-if (!shopifyUrl && fileId) {
-  console.log("Waiting for Shopify to generate file URL...");
+    let shopifyUrl = uploadedFile?.url;
+    const fileId = uploadedFile?.id;
 
-  // Poll the file node up to 5 times with 2s delay
-  for (let i = 0; i < 5; i++) {
-    await new Promise(r => setTimeout(r, 2000));
-    const pollRes = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "X-Shopify-Access-Token": session.accessToken ?? "",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        query: `
+    if (!shopifyUrl && fileId) {
+      console.log("Waiting for Shopify to generate file URL...");
+
+      // Poll the file node up to 5 times with 2s delay
+      for (let i = 0; i < 5; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const pollRes = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "X-Shopify-Access-Token": session.accessToken ?? "",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            query: `
           query getFile($id: ID!) {
             node(id: $id) {
               ... on GenericFile {
@@ -479,32 +477,32 @@ if (!shopifyUrl && fileId) {
             }
           }
         `,
-        variables: { id: fileId },
-      }),
-    });
+            variables: { id: fileId },
+          }),
+        });
 
-    const pollData = await pollRes.json();
-    const node = pollData.data?.node;
+        const pollData = await pollRes.json();
+        const node = pollData.data?.node;
 
-    if (node?.url) {
-      shopifyUrl = node.url;
-      console.log("✅ URL ready:", shopifyUrl);
-      break;
+        if (node?.url) {
+          shopifyUrl = node.url;
+          console.log("✅ URL ready:", shopifyUrl);
+          break;
+        }
+
+        console.log(`Retry ${i + 1}: still waiting for URL... (status: ${node?.fileStatus})`);
+      }
     }
 
-    console.log(`Retry ${i + 1}: still waiting for URL... (status: ${node?.fileStatus})`);
-  }
-}
-
-if (!shopifyUrl) {
-  throw new Error("File uploaded but URL not yet available after waiting");
-}
+    if (!shopifyUrl) {
+      throw new Error("File uploaded but URL not yet available after waiting");
+    }
 
 
-    
+
     // Return success response with file path and Shopify URL
-    return json({ 
-      success: true, 
+    return json({
+      success: true,
       message: `PDF with ${orders.length} packing slips generated and uploaded successfully`,
       shopifyUrl,
       filePath,
